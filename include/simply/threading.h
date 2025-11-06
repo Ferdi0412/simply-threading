@@ -43,9 +43,9 @@
 #include <system_error>
 
 #if SIMPLY_WINDOWS
-    #if !defined(SIMPLY_WIN_7) && _WIN32_WINNT < 0x0602
-        #error "simply-threading: Windows API < 8 - compile with either -DSIMPLY_WIN_7 or -D_WIN32_WINNT=0x0602 - see threading.h notices"
-    #endif
+    // #if !defined(SIMPLY_WIN_7) && _WIN32_WINNT < 0x0602
+    //     #error "simply-threading: Windows API < 8 - compile with either -DSIMPLY_WIN_7 or -D_WIN32_WINNT=0x0602 - see threading.h notices"
+    // #endif
     #include <windows.h>
 #endif
 
@@ -215,12 +215,14 @@ namespace simply {
             Thread::Priority get_priority();
         #endif
 
-        #if !(defined(SIMPLY_WIN_7) && SIMPLY_WINDOWS)
-            ///   get_stack_size
-            /// @brief Get the number of bytes reserved for/allocated to the current thread
-            /// @note {Windows} This is only available for Windows SDK 8+, and may need compilation flags depending on compiler
-            size_t get_stack_size();
-        #endif
+        // "Suppress" until a good workaround found through cmake
+        /// @todo - Fix the get_stack_size C++ implementation
+        // #if !(defined(SIMPLY_WIN_7) && SIMPLY_WINDOWS)
+        //     ///   get_stack_size
+        //     /// @brief Get the number of bytes reserved for/allocated to the current thread
+        //     /// @note {Windows} This is only available for Windows SDK 8+, and may need compilation flags depending on compiler
+        //     size_t get_stack_size();
+        // #endif
 
         // To add:
         // xx CPU affinity xx can't GET CPU affinity... Can only set...
@@ -277,7 +279,7 @@ namespace simply {
             SwitchToThread();
         }
 
-        void sleep(ms_type ms_sleep) {
+        void this_thread::sleep(ms_type ms_sleep) {
             if ( ms_sleep > std::numeric_limits<DWORD>::max() )
                 throw std::system_error(
                     std::make_error_code(std::errc::invalid_argument),
@@ -377,12 +379,13 @@ namespace simply {
             }
         }
 
-        size_t this_thread::get_stack_size() {
-            ULONG_PTR low;
-            ULONG_PTR high;
-            GetCurrentThreadStackLimits(&low, &high);
-            return static_cast<size_t>(high - low);
-        }
+        // Suppressed for reason at declaration of this...
+            // size_t this_thread::get_stack_size() {
+            //     ULONG_PTR low;
+            //     ULONG_PTR high;
+            //     GetCurrentThreadStackLimits(&low, &high);
+            //     return static_cast<size_t>(high - low);
+            // }
     #endif
 }
 
