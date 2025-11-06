@@ -638,24 +638,24 @@ namespace simply {
     #if SIMPLY_WINDOWS
         void Thread::join() {
             _ensure_joinable("join");
-            if ( WaitForSingleObject(handle_, INFINITE) != WAIT_OBJECT_0 )
-                throw std::system_error(GetLastError(), std::system_category());
             #if SIMPLY_std20plus
                 request_stop();
             #endif
+            if ( WaitForSingleObject(handle_, INFINITE) != WAIT_OBJECT_0 )
+                throw std::system_error(GetLastError(), std::system_category());
             _reset();
         }
 
         bool Thread::join(ms_type ms_timeout) {
             _ensure_joinable("join");
+            #if SIMPLY_std20plus
+                request_stop();
+            #endif
             if ( ms_timeout == std::numeric_limits<DWORD>::max() )
                 throw std::system_error(
                     std::make_error_code(std::errc::invalid_argument),
                     "Thread::join: Windows timeouts must be less than 0xFFFFFFFF!"
                 );
-            #if SIMPLY_std20plus
-                request_stop();
-            #endif
             switch ( WaitForSingleObject(handle_, ms_timeout) ) {
                 case WAIT_OBJECT_0:
                     _reset();
