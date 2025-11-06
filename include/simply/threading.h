@@ -44,6 +44,10 @@
 #include <string>
 #include <system_error>
 
+#if SIMPLY_std20plus
+    #include <stop_token>
+#endif
+
 #if SIMPLY_WINDOWS
     // #if !defined(SIMPLY_WIN_7) && _WIN32_WINNT < 0x0602
     //     #error "simply-threading: Windows API < 8 - compile with either -DSIMPLY_WIN_7 or -D_WIN32_WINNT=0x0602 - see threading.h notices"
@@ -208,12 +212,12 @@ namespace simply {
         ///   join_for {timed}
         /// @brief Timed join using standard chrono library
         template <class Rep, class Period>
-        void join_for(const std::chrono::duration<Rep, Period>& timeout_duration) const;
+        bool join_for(const std::chrono::duration<Rep, Period>& timeout_duration);
 
         ///   join_until {timed}
         /// @brief Timed join, returning if thread hasn't joined by timepoint
         template <class Clock, class Duration>
-        void join_until(const std::chrono::time_point<Clock, Duration>& timeout_time) const;
+        bool join_until(const std::chrono::time_point<Clock, Duration>& timeout_time);
 
         ///   detach
         /// @brief Let thread execute independently of this object
@@ -410,7 +414,7 @@ namespace simply {
     bool operator==(Thread::id lhs, Thread::id rhs) noexcept { return lhs.id_ == rhs.id_; }
 
     #if SIMPLY_std20plus
-        bool operator<=>(Thread::id lhs, Thread::id rhs) noexcept { return lhs.id_ <=> rhs.id_; }
+        std::strong_ordering operator<=>(Thread::id lhs, Thread::id rhs) noexcept { return lhs.id_ <=> rhs.id_; }
 
     #else
         bool operator!=(Thread::id lhs, Thread::id rhs) noexcept { return lhs.id_ != rhs.id_; } 
@@ -450,7 +454,7 @@ namespace simply {
     #endif
     
     template <class T, size_t... I>
-    constexpr auto _invoke_get(std::index_sequence<I...>) noexcept {
+    constexpr auto _invoker_get(std::index_sequence<I...>) noexcept {
         return &_invoke<T, I...>;
     }
 
@@ -473,7 +477,7 @@ namespace simply {
                 );
                 data_copy = std::make_unique<T>(
                     std::forward<F>(f),
-                    std::forward<std::stop_token>(source.get_token()),
+                    std::forward<std::stop_token>(stop_source.get_token()),
                     std::forward<Args>(args)...
                 );
             }
@@ -490,7 +494,7 @@ namespace simply {
 
             std::unique_ptr<T> data_copy = std::make_unique<T>(std::forward<F>(f), std::forward<Args>(args)...);
 
-            constexpr auto invoker = _invoke_get<T>(std::make_index_sequence<std::tuple_size_v<T>>{});
+            constexpr auto invoker = _invoker_get<T>(std::make_index_sequence<std::tuple_size_v<T>>{});
         #endif
 
         #if SIMPLY_WINDOWS
@@ -665,6 +669,32 @@ namespace simply {
             }
         }
 
+    #elif SIMPLY_LINUX
+
+    #endif
+
+    template <class Rep, class Period>
+    bool Thread::join_for(const std::chrono::duration<Rep, Period>& timeout_duration) {
+        _ensure_joinable("join_for");
+        return this->join_until(std::chrono::steady_clock::now() + timeout_duration);
+    }
+
+    template <class Clock, class Duration>
+    bool Thread::join_until(const std::chrono::time_point<Clock, Duration>& timeout_time) {
+        _ensure_joinable("join_until");
+        bool joined = false;
+        while (
+            (Clock::now() + std::chrono::milliseconds(this->max_timeout()) < timeout_time) &&
+            !(joined = this->join(this->max_timeout()))
+        )
+            ;
+        if ( joined )
+            return true;
+        auto d = std::chrono::duration_cast<std::chrono::milliseconds>(timeout_time - Clock::now()).count();
+        return this->join(d);
+    }
+
+    #if SIMPLY_WINDOWS
         void Thread::detach() {
             _ensure_joinable("detach");
             CloseHandle(handle_);
@@ -706,7 +736,7 @@ namespace simply {
             return stop_source_.get_token();
         }
 
-        bool Thread::request_stop() const noexcept {
+        bool Thread::request_stop() noexcept {
             return stop_source_.request_stop();
         }
 
@@ -716,7 +746,7 @@ namespace simply {
     /// CONTINUE...
 
     #if SIMPLY_WINDOWS
-        static unsigned int hardware_concurrency() noexcept {
+        inline unsigned int Thread::hardware_concurrency() noexcept {
             SYSTEM_INFO sysinfo {0};
             GetSystemInfo(&sysinfo);
             return sysinfo.dwNumberOfProcessors;
