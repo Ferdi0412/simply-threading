@@ -436,30 +436,37 @@ namespace simply {
     
     #else
         #define TYPE_STOP_SOURCE void* 
-
     #endif 
 
     /* === Start Thread Wrappers === ++++++++++++++++++++++++++++++++ */
     #if SIMPLY_WINDOWS
-        template <class T, size_t... I>
-        unsigned __stdcall _invoke(void* lparg) noexcept {
-            const std::unique_ptr<T> arg_ptr(static_cast<T*>(lparg));
-            T& args = *arg_ptr;
-            std::invoke(std::move(std::get<I>(args))...);
-            return 0;
-        }
-
+        #define THREAD_RETURN_TYPE unsigned __stdcall
+        #define SIMPLY_NULL_THREAD nullptr
+    
     #elif SIMPLY_LINUX  
-
+        #define THREAD_RETURN_TYPE void*
+        #define SIMPLY_NULL_THREAD 0
     #endif
     
+    template <class T, size_t... I>
+    THREAD_RETURN_TYPE _invoke(void* lparg) noexcept {
+        const std::unique_ptr<T> arg_ptr(static_cast<T*>(lparg));
+        T& args = *arg_ptr;
+        std::invoke(std::move(std::get<I>(args))...);
+        #if SIMPLY_WINDOWS
+            return 0;
+        #elif SIMPLY_LINUX
+            return nullptr;
+        #endif
+    }
+
     template <class T, size_t... I>
     constexpr auto _invoker_get(std::index_sequence<I...>) noexcept {
         return &_invoke<T, I...>;
     }
 
     template <class F, class... Args>
-    void _start(size_t stack_size, TYPE_STOP_SOURCE stop_source, HANDLE& handle, F&& f, Args&&... args) {
+    void _start(size_t stack_size, TYPE_STOP_SOURCE stop_source, Thread::native_handle_type& handle, F&& f, Args&&... args) {
         #if SIMPLY_std20plus
             constexpr bool takes_stop_token = std::is_invocable_v<F, std::stop_token, Args...>;
 
@@ -513,16 +520,18 @@ namespace simply {
             handle = reinterpret_cast<HANDLE>(h);
 
         #elif SIMPLY_LINUX
+            /// @todo - assign stack size using arg 2 (NULL)
+            int err = pthread_create(&handle, NULL, invoker, data_copy.get());
 
+            if ( err )
+                throw std::system_error(err, std::system_category());
+        
         #endif
 
         data_copy.release();
     }
 
     #if SIMPLY_WINDOWS
-        /* === Windows OS Wrappers === ++++++++++++++++++++++++++++++ */
-        #define SIMPLY_NULL_THREAD nullptr
-
         inline std::string _from_wstring(const std::wstring& wname) noexcept {
             size_t len = std::wcstombs(nullptr, wname.c_str(), 0) + 1;
             char* buffer = new char[len];
@@ -562,8 +571,21 @@ namespace simply {
         }
 
     #elif SIMPLY_LINUX
-        /* === Linux Constructor === ++++++++++++++++++++++++++++++++ */
-        #define SIMPLY_NULL_THREAD 0
+        inline std::string _get_name(pthread_t thread) {
+            char name[16];
+            pthread_getname_np(thread, name, sizeof(name));
+            return name;
+        }
+
+        inline void _set_name(pthread_t thread, const std::string& name) {
+            if ( name.size() > 15 )
+                throw std::system_error(
+                    std::make_error_code(std::errc::invalid_argument),
+                    "this_thread::set_name: Linux only supports 15 chars followed by NULL for name"
+                );
+            pthread_setname_np(thread, name.c_str());
+        }
+        
     #endif
 
     Thread::Thread() noexcept: handle_(SIMPLY_NULL_THREAD) {}
@@ -670,6 +692,47 @@ namespace simply {
         }
 
     #elif SIMPLY_LINUX
+        void Thread::join() {
+            _ensure_joinable("join");
+            #if SIMPLY_std20plus
+                request_stop();
+            #endif
+            if ( int err = pthread_join(handle_, NULL) )
+                throw std::system_error(err, std::system_category());
+            _reset();
+        }
+
+        void _join_timeout(ms_type ms_timeout, struct timespec* ts) {
+            if ( clock_gettime(CLOCK_REALTIME, ts ) )
+                throw std::system_error(errno, std::system_category());
+            ts->tv_sec += ms_timeout / 1000;
+            ts->tv_nsec += (ms_timeout % 1000) * 1000000;
+            if ( ts->tv_nsec > 999999999 ) {
+                ts->tv_sec  += 1;
+                ts->tv_nsec %= 1000000000;
+            }
+        }
+
+        bool Thread::join(ms_type ms_timeout) {
+            _ensure_joinable("join");
+            #if SIMPLY_std20plus
+                request_stop();
+            #endif
+            struct timespec timeout; 
+            _join_timeout(ms_timeout, &timeout);
+            int err = pthread_timedjoin_np(handle_, NULL, &timeout);
+            switch ( err ) {
+                case ETIMEDOUT:
+                    return false;
+
+                case 0:
+                    _reset();
+                    return true;
+
+                default:
+                    throw std::system_error(err, std::system_category());
+            }
+        }
 
     #endif
 
@@ -702,7 +765,11 @@ namespace simply {
         }
 
     #elif SIMPLY_LINUX
-
+        void Thread::detach() {
+            _ensure_joinable("detach");
+            pthread_detach(handle_);
+            _reset();
+        }
     #endif
 
     void Thread::set_name(const std::string& name) {
@@ -742,9 +809,6 @@ namespace simply {
 
     #endif
 
-    /// @todo - CONTINUE
-    /// CONTINUE...
-
     #if SIMPLY_WINDOWS
         inline unsigned int Thread::hardware_concurrency() noexcept {
             SYSTEM_INFO sysinfo {0};
@@ -752,7 +816,12 @@ namespace simply {
             return sysinfo.dwNumberOfProcessors;
         }
     #elif SIMPLY_LINUX
-
+        inline unsigned int Thread::hardware_concurrency() noexcept {
+            long n = sysconf(_SC_NPROCESSORS_ONLN);
+            if ( n < 0 )
+                return 0;
+            return (unsigned int) n;
+        }
     #endif
 
     #if SIMPLY_WINDOWS
@@ -868,18 +937,11 @@ namespace simply {
 
     #elif SIMPLY_LINUX
         inline std::string this_thread::get_name() {
-            char name[16];
-            pthread_getname_np(pthread_self(), name, sizeof(name));
-            return name;
+            return _get_name(pthread_self());
         }
 
         inline void this_thread::set_name(const std::string& name) {
-            if ( name.size() > 15 )
-                throw std::system_error(
-                    std::make_error_code(std::errc::invalid_argument),
-                    "this_thread::set_name: Linux only supports 15 chars followed by NULL for name"
-                );
-            pthread_setname_np(pthread_self(), name.c_str());
+            _set_name(pthread_self(), name);
         }
     #endif
 
