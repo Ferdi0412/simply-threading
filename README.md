@@ -152,6 +152,7 @@ For Linux, there are 2 "types" of priority... **[ADD EXPLANATION...]**
 **Initial Release Roadmap:** (Linux & Windows)
 - [x] this_thread namespace
     - [ ] Fix `get_stack_size`
+    - [ ] Implement `Priority` for Linux
 - [ ] Thread class
 - [ ] tests & examples
 - RELEASE 0.0.1
