@@ -47,6 +47,11 @@
     //     #error "simply-threading: Windows API < 8 - compile with either -DSIMPLY_WIN_7 or -D_WIN32_WINNT=0x0602 - see threading.h notices"
     // #endif
     #include <windows.h>
+
+#elif SIMPLY_LINUX
+    #include <pthread.h>
+    #include <unistd.h>
+
 #endif
 
 namespace simply {
@@ -61,6 +66,10 @@ namespace simply {
     public:
         #if SIMPLY_WINDOWS
             using native_handle_type = HANDLE;
+
+        #elif SIMPLY_LINUX
+            using native_handle_type = pthread_t;
+
         #endif
 
     public:
@@ -95,6 +104,10 @@ namespace simply {
         public:
             #if SIMPLY_WINDOWS
                 using native_id_type = DWORD;
+
+            #elif SIMPLY_LINUX
+                using native_id_type = pthread_t;
+
             #endif
 
         public:
@@ -239,6 +252,9 @@ namespace simply {
     // Failure should not be expected on most modern OSs
     #if SIMPLY_WINDOWS
         Thread::id::id(Thread::native_handle_type handle) noexcept: id_(GetThreadId(handle)) {}
+    
+    #elif SIMPLY_LINUX
+        Thread::id::id(Thread::native_handle_type handle) noexcept: id_(handle) {}
     #endif
 
     bool operator==(Thread::id lhs, Thread::id rhs) noexcept { return lhs.id_ == rhs.id_; }
@@ -265,6 +281,11 @@ namespace simply {
         inline ms_type Thread::max_sleep() noexcept {
             return std::numeric_limits<DWORD>::max() - 1;
         }
+
+    #elif SIMPLY_LINUX
+        inline ms_type Thread::max_sleep() noexcept {
+            return std::numeric_limits<uint32_t>::max();
+        }
     #endif
 
     // =================================================================
@@ -287,6 +308,31 @@ namespace simply {
                 );
             Sleep(ms_sleep);
         } 
+
+    #elif SIMPLY_LINUX
+        Thread::id this_thread::get_id() noexcept {
+            return Thread::id(pthread_self());
+        }
+
+        void this_thread::yield() noexcept {
+            pthread_yield();
+        }
+
+        void this_thread::sleep(ms_type ms_sleep) {
+            if ( ms_sleep > Thread::max_sleep() )
+                throw std::system_error (
+                    std::make_error_code(std::errc::invalid_argument),
+                    "this_thread::sleep: Too long a period to sleep for!"
+                );
+            
+            struct timespec duration;
+            duration.tv_nsec = (ms_sleep % 1000000) * 1000;
+            duration.tv_sec  = (ms_sleep / 1000);
+            
+            /// @todo - Make nanosleep more robust by checking err and return
+            nanosleep(&duration, nullptr);
+        }
+
     #endif
 
     template <class Clock, class Duration>
@@ -345,7 +391,21 @@ namespace simply {
             delete[] buffer;
             return wname;
         }
+    #elif SIMPLY_LINUX
+        inline std::string this_thread::get_name() {
+            char name[16];
+            pthread_getname_np(pthread_self(), name, sizeof(name));
+            return name;
+        }
 
+        inline void this_thread::set_name(const std::string& name) {
+            if ( name.size() > 15 )
+                throw std::system_error(
+                    std::make_error_code(std::errc::invalid_argument),
+                    "this_thread::set_name: Linux only supports 15 chars followed by NULL for name"
+                );
+            pthread_setname_np(pthread_self(), name.c_str());
+        }
     #endif
 
     #if SIMPLY_WINDOWS
@@ -386,6 +446,9 @@ namespace simply {
             //     GetCurrentThreadStackLimits(&low, &high);
             //     return static_cast<size_t>(high - low);
             // }
+    #elif SIMPLY_LINUX 
+
+
     #endif
 }
 

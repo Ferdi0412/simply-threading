@@ -20,7 +20,9 @@ target_include_directories(Threading INTERFACE
 
 add_library(Simply::Threading ALIAS Threading)
 
-
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux") # if (LINUX) didn't work
+    target_link_libraries(Threading INTERFACE pthread)
+endif()
 
 ##   Build examples
 ## If building from the simply-threading root,
