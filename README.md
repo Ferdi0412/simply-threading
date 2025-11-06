@@ -154,7 +154,7 @@ For Linux, there are 2 "types" of priority... **[ADD EXPLANATION...]**
     - [ ] Fix `get_stack_size`
     - [ ] Implement `Priority` for Linux
 - [x] Thread class
-    - [ ] Fix Windows implementation
+    - [x] Fix Windows implementation - Appears to run as expected
     - [ ] Implement for Linux
 - [x] tests & examples
     - [ ] Ensure completeness of `simply::Thread` tests
