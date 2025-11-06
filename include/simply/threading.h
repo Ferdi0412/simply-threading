@@ -73,7 +73,7 @@ namespace simply {
         #endif
 
     public:
-        /* === Public Class Declarations === */
+        /* === Public Class Declarations === ======================== */
         class id;
         
         #if SIMPLY_WINDOWS
@@ -97,7 +97,7 @@ namespace simply {
         static ms_type max_sleep() noexcept;
 
 
-        /* === Classes Implementations === */
+        /* === Classes Implementations === ========================== */
         ///   id
         /// @brief Used to uniquely identify a thread instance
         class id {
@@ -111,7 +111,7 @@ namespace simply {
             #endif
 
         public:
-            /* === Constructors === */
+            /* === Constructors === ================================= */
             ///   id
             /// @brief This does not represent a thread of execution 
             id() noexcept;
@@ -120,7 +120,7 @@ namespace simply {
             id(native_handle_type handle) noexcept;
 
         public:
-            /* === Comparisons === */
+            /* === Comparisons === ================================== */
             friend bool operator==(id lhs, id rhs) noexcept;
 
             #if SIMPLY_std20plus
@@ -135,7 +135,7 @@ namespace simply {
             #endif
 
         public:
-            /* === Formatting & Hashing === */
+            /* === Formatting & Hashing === ========================= */
             template <class CharT, class Traits>
             friend std::basic_ostream<CharT, Traits>&
             operator<<(std::basic_ostream<CharT, Traits>& lhs, id rhs);
@@ -242,10 +242,13 @@ namespace simply {
     }
 }
 
+// =====================================================================
+// >> Implementations
+// =====================================================================
 namespace simply {
-    // =================================================================
+    // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     // ++ Thread::id
-    // =================================================================
+    // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     // 0 should never be expected for a thread on most modern OSs
     Thread::id::id() noexcept: id_(0) {}
 
@@ -274,9 +277,9 @@ namespace simply {
     inline std::basic_ostream<CharT, Traits>&
     operator<<(std::basic_ostream<CharT, Traits>& lhs, Thread::id rhs) { lhs << std::to_string(rhs.id_); return lhs; }
 
-    // =================================================================
+    // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     // ++ Thread
-    // =================================================================
+    // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #if SIMPLY_WINDOWS
         inline ms_type Thread::max_sleep() noexcept {
             return std::numeric_limits<DWORD>::max() - 1;
@@ -288,9 +291,9 @@ namespace simply {
         }
     #endif
 
-    // =================================================================
+    // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     // ++ this_thread
-    // =================================================================
+    // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     #if SIMPLY_WINDOWS
         Thread::id this_thread::get_id() noexcept {
             return Thread::id(GetCurrentThread());
