@@ -150,7 +150,8 @@ For Linux, there are 2 "types" of priority... **[ADD EXPLANATION...]**
 
 ## Development Notes
 **Initial Release Roadmap:** (Linux & Windows)
-- [ ] this_thread namespace
+- [x] this_thread namespace
+    - [ ] Fix `get_stack_size`
 - [ ] Thread class
 - [ ] tests & examples
 - RELEASE 0.0.1
