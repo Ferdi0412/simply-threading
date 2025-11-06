@@ -11,3 +11,4 @@ endfunction()
 
 ##   Compile examples
 add_example(01_this_thread)
+add_example(02_thread)
