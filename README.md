@@ -153,8 +153,12 @@ For Linux, there are 2 "types" of priority... **[ADD EXPLANATION...]**
 - [x] this_thread namespace
     - [ ] Fix `get_stack_size`
     - [ ] Implement `Priority` for Linux
-- [ ] Thread class
-- [ ] tests & examples
+- [x] Thread class
+    - [ ] Fix Windows implementation
+    - [ ] Implement for Linux
+- [x] tests & examples
+    - [ ] Ensure completeness of `simply::Thread` tests
+    - [ ] Add some logging/debugging, perhaps also some benchmarking
 - RELEASE 0.0.1
 - [ ] FutureThread
 
