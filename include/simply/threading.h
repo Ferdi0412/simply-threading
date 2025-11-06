@@ -37,7 +37,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <limits>
+#include <memory>
 #include <ostream>
 #include <string>
 #include <system_error>
@@ -166,14 +168,14 @@ namespace simply {
         Thread& operator=(const Thread&) = delete;
 
         ///   Move Constructor
-        Thread(Thread&& other) = default;
+        Thread(Thread&& other);
 
         ///   Move Assignment {blocking}
         /// @brief If this is joinable, will join
         Thread& operator=(Thread&& other);
 
         ///   swap
-        /// @brief Swap instances
+        /// @brief Swap instances 
         void swap(Thread& other) noexcept;
 
         /* === Observers === ======================================== */
@@ -184,17 +186,6 @@ namespace simply {
         ///   get_id
         /// @brief Get a unique identifier for this thread
         id get_id() const noexcept;
-
-        ///   get_name
-        /// @brief Get name for this thread
-        std::string get_name() const;
-
-        #if SIMPLY_WINDOWS
-            ///   get_wide_name {Windows}
-            /// @brief Get the wide string name for this thread
-            std::wstring get_wide_name() const;
-
-        #endif
 
         ///   native_handle
         /// @brief Get the native handle for custom control
@@ -208,9 +199,11 @@ namespace simply {
         ///   join {timed}
         /// @brief Timed join
         /// 
+        /// Returns `true` if successfully joined
+        /// 
         /// If the thread doesn't join in specified timeout, it will
         /// still be joinable
-        void join(ms_type ms_timeout);
+        bool join(ms_type ms_timeout);
 
         ///   join_for {timed}
         /// @brief Timed join using standard chrono library
@@ -233,10 +226,19 @@ namespace simply {
         /// For Linux, this cannot be more than 15 characters
         void set_name(const std::string& name);
 
+        ///   get_name
+        /// @brief Get name for this thread
+        std::string get_name() const;
+
         #if SIMPLY_WINDOWS
             ///   set_wide_name {Windows}
             /// @brief Set a human-readable name using wide string
             void set_wide_name(const std::wstring& name);
+
+            ///   get_wide_name {Windows}
+            /// @brief Get the wide string name for this thread
+            std::wstring get_wide_name() const;
+
         #endif
 
         /* === Stop Token Support === =============================== */
@@ -284,8 +286,22 @@ namespace simply {
         /// @brief Maximum milliseconds one sleep call supports
         static ms_type max_sleep() noexcept;
     
+        ///   max_timeout
+        /// @brief Maximum milliseconds one join (or similar) call supports
+        static ms_type max_timeout() noexcept;
+
     private:
-        native_handle_type handle_;    
+        // Throw appropriate system_error for non-joinable calls
+        void _ensure_joinable(const std::string& called_from) const;
+
+        // To ensure proper cleanup
+        void _reset();
+
+        native_handle_type handle_;  
+
+        #if SIMPLY_std20plus
+            std::stop_source stop_source_;
+        #endif
     };
 
     // =================================================================
@@ -351,14 +367,6 @@ namespace simply {
             ///  - system_error if system API calls failed
             std::wstring get_wide_name();
 
-            ///   from_wide {internal}
-            /// @brief Convert from wstring to string
-            std::string from_wide(const std::wstring& wname) noexcept;
-
-            ///   to_wide {internal}
-            /// @brief Convert from string to wstring
-            std::wstring to_wide(const std::string& name) noexcept;
-
         #endif
 
         #if SIMPLY_WINDOWS    
@@ -419,6 +427,304 @@ namespace simply {
     // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     // ++ Thread
     // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    #if SIMPLY_std20plus
+        #define TYPE_STOP_SOURCE const std::stop_source&
+    
+    #else
+        #define TYPE_STOP_SOURCE void* 
+
+    #endif 
+
+    /* === Start Thread Wrappers === ++++++++++++++++++++++++++++++++ */
+    #if SIMPLY_WINDOWS
+        template <class T, size_t... I>
+        unsigned __stdcall _invoke(void* lparg) noexcept {
+            const std::unique_ptr<T> arg_ptr(static_cast<T*>(lparg));
+            T& args = *arg_ptr;
+            std::invoke(std::move(std::get<I>(args))...);
+            return 0;
+        }
+
+    #elif SIMPLY_LINUX  
+
+    #endif
+    
+    template <class T, size_t... I>
+    constexpr auto _invoke_get(std::index_sequence<I...>) noexcept {
+        return &_invoke<T, I...>;
+    }
+
+    template <class F, class... Args>
+    void _start(size_t stack_size, TYPE_STOP_SOURCE stop_source, HANDLE& handle, F&& f, Args&&... args) {
+        #if SIMPLY_std20plus
+            constexpr bool takes_stop_token = std::is_invocable_v<F, std::stop_token, Args...>;
+
+            using T = std::conditional_t<
+                takes_stop_token,
+                std::tuple<std::decay_t<F>, std::stop_token, std::decay_t<Args>...>,
+                std::tuple<std::decay_t<F>, std::decay_t<Args>...>
+            >;
+
+            std::unique_ptr<T> data_copy;
+
+            if constexpr ( takes_stop_token ) {
+                static_assert(std::is_invocable_v<F, std::stop_token, Args...>,
+                    "Thread function/args (w/ stop_token) are malformed..."
+                );
+                data_copy = std::make_unique<T>(
+                    std::forward<F>(f),
+                    std::forward<std::stop_token>(source.get_token()),
+                    std::forward<Args>(args)...
+                );
+            }
+            else {
+                static_assert(std::is_invocable_v<F, Args...>, "Thread function/args are malformed...");
+                data_copy = std::make_unique<T>(std::forward<F>(f), std::forward<Args>(args)...);
+            }
+
+            constexpr auto invoker = _invoker_get<T>(std::make_index_sequence<std::tuple_size_v<T>>{});
+        #else
+            using T = std::tuple<std::decay_t<F>, std::decay_t<Args>...>;
+
+            static_assert(std::is_invocable_v<F, Args...>, "Thread function/args are malformed...");
+
+            std::unique_ptr<T> data_copy = std::make_unique<T>(std::forward<F>(f), std::forward<Args>(args)...);
+
+            constexpr auto invoker = _invoke_get<T>(std::make_index_sequence<std::tuple_size_v<T>>{});
+        #endif
+
+        #if SIMPLY_WINDOWS
+            uintptr_t h = _beginthreadex(
+                nullptr,
+                stack_size,
+                invoker,
+                data_copy.get(),
+                0,
+                nullptr
+            );
+            
+            if ( h == -1L )
+                throw std::system_error(errno, std::system_category());
+        
+            handle = reinterpret_cast<HANDLE>(h);
+
+        #elif SIMPLY_LINUX
+
+        #endif
+
+        data_copy.release();
+    }
+
+    #if SIMPLY_WINDOWS
+        /* === Windows OS Wrappers === ++++++++++++++++++++++++++++++ */
+        #define SIMPLY_NULL_THREAD nullptr
+
+        inline std::string _from_wstring(const std::wstring& wname) noexcept {
+            size_t len = std::wcstombs(nullptr, wname.c_str(), 0) + 1;
+            char* buffer = new char[len];
+            std::wcstombs(buffer, wname.c_str(), len);
+            std::string name(buffer);
+            delete[] buffer;
+            return name;
+        }
+
+        inline std::wstring _to_wstring(const std::string& name) noexcept {
+            size_t len = std::mbstowcs(nullptr, name.c_str(), 0) + 1;
+            wchar_t* buffer = new wchar_t[len];
+            std::mbstowcs(buffer, name.c_str(), len);
+            std::wstring wname(buffer);
+            delete[] buffer;
+            return wname;
+        }
+
+        inline std::wstring _get_wide_name(HANDLE handle) {
+            PWSTR description = nullptr;
+            GetThreadDescription(handle, &description); // Check error...
+            std::wstring wname(description);
+            LocalFree(description); // Check error...
+            return wname;
+        }
+
+        inline void _set_wide_name(HANDLE handle, const std::wstring& wname) {
+            SetThreadDescription(handle, wname.c_str());
+        }
+
+        inline std::string _get_name(HANDLE handle) {
+            return _from_wstring(_get_wide_name(handle));
+        }
+
+        inline void _set_name(HANDLE handle, const std::string& name) {
+            _set_wide_name(handle, _to_wstring(name));
+        }
+
+    #elif SIMPLY_LINUX
+        /* === Linux Constructor === ++++++++++++++++++++++++++++++++ */
+        #define SIMPLY_NULL_THREAD 0
+    #endif
+
+    Thread::Thread() noexcept: handle_(SIMPLY_NULL_THREAD) {}
+
+    /* === Constructor === ++++++++++++++++++++++++++++++ */
+    template <class F, class... Args>
+    Thread::Thread(F&& f, Args&&... args): Thread() {
+        #if SIMPLY_std20plus
+            _start(0, stop_source_, handle_, std::forward<F>(f), std::forward<Args>(args)...);
+        #else
+            _start(0, nullptr, handle_, std::forward<F>(f), std::forward<Args>(args)...);
+        #endif
+    }
+
+    template <class F, class... Args>
+    Thread::Thread(size_t stack_size, F&& f, Args&&... args): Thread() {
+        #if SIMPLY_std20plus
+            _start(stack_size, stop_source_, handle_, std::forward<F>(f), std::forward<Args>(args)...);
+        #else
+            _start(stack_size, nullptr, handle_, std::forward<F>(f), std::forward<Args>(args)...);
+        #endif
+    }
+
+    Thread::~Thread() {
+        if ( joinable() )
+            join();
+    }
+
+    Thread::Thread(Thread&& other): Thread() {
+        if ( other.get_id() == this_thread::get_id() )
+            throw std::system_error(
+                std::make_error_code(std::errc::invalid_argument),
+                "Thread::(move_constructor): Can't move thread object into associate thread!"
+            );
+        this->swap(other);
+    }
+
+    Thread& Thread::operator=(Thread&& other) {
+        if ( other.get_id() == this_thread::get_id() )
+            throw std::system_error(
+                std::make_error_code(std::errc::invalid_argument),
+                "Thread::(move_assignment): Can't move thread object into associate thread!"
+            );
+        if ( joinable() )
+            join();
+        this->swap(other);
+        return *this;
+    }
+
+    void Thread::swap(Thread& other) noexcept {
+        std::swap(handle_, other.handle_);
+        #if SIMPLY_std20plus
+            std::swap(stop_source_, other.stop_source_);
+        #endif
+    }
+
+    bool Thread::joinable() const noexcept {
+        return handle_ != SIMPLY_NULL_THREAD;
+    }
+
+    Thread::native_handle_type Thread::native_handle() {
+        _ensure_joinable("native_handle");
+        return handle_;
+    }
+
+    Thread::id Thread::get_id() const noexcept {
+        if ( joinable() )
+            return Thread::id(handle_);
+        return Thread::id();
+    }
+
+    #if SIMPLY_WINDOWS
+        void Thread::join() {
+            _ensure_joinable("join");
+            if ( WaitForSingleObject(handle_, INFINITE) != WAIT_OBJECT_0 )
+                throw std::system_error(GetLastError(), std::system_category());
+            #if SIMPLY_std20plus
+                request_stop();
+            #endif
+            _reset();
+        }
+
+        bool Thread::join(ms_type ms_timeout) {
+            _ensure_joinable("join");
+            if ( ms_timeout == std::numeric_limits<DWORD>::max() )
+                throw std::system_error(
+                    std::make_error_code(std::errc::invalid_argument),
+                    "Thread::join: Windows timeouts must be less than 0xFFFFFFFF!"
+                );
+            #if SIMPLY_std20plus
+                request_stop();
+            #endif
+            switch ( WaitForSingleObject(handle_, ms_timeout) ) {
+                case WAIT_OBJECT_0:
+                    _reset();
+                    return true;
+                
+                case WAIT_TIMEOUT:
+                    return false;
+
+                default:
+                    throw std::system_error(GetLastError(), std::system_category());
+            }
+        }
+
+        void Thread::detach() {
+            _ensure_joinable("detach");
+            CloseHandle(handle_);
+            _reset();
+        }
+
+    #elif SIMPLY_LINUX
+
+    #endif
+
+    void Thread::set_name(const std::string& name) {
+        _ensure_joinable("set_name");
+        _set_name(handle_, name);
+    }
+
+    std::string Thread::get_name() const {
+        _ensure_joinable("get_name");
+        return _get_name(handle_);
+    }
+
+    #if SIMPLY_WINDOWS
+        void Thread::set_wide_name(const std::wstring& wname) {
+            _ensure_joinable("set_wide_name");
+            _set_wide_name(handle_, wname);
+        }
+
+        std::wstring Thread::get_wide_name() const {
+            _ensure_joinable("get_wide_name");
+            return _get_wide_name(handle_);
+        }
+    #endif
+
+    #if SIMPLY_std20plus
+        std::stop_source Thread::get_stop_source() noexcept {
+            return stop_source_;
+        }
+
+        std::stop_token Thread::get_stop_token() const noexcept {
+            return stop_source_.get_token();
+        }
+
+        bool Thread::request_stop() const noexcept {
+            return stop_source_.request_stop();
+        }
+
+    #endif
+
+    /// @todo - CONTINUE
+    /// CONTINUE...
+
+    #if SIMPLY_WINDOWS
+        static unsigned int hardware_concurrency() noexcept {
+            SYSTEM_INFO sysinfo {0};
+            GetSystemInfo(&sysinfo);
+            return sysinfo.dwNumberOfProcessors;
+        }
+    #elif SIMPLY_LINUX
+
+    #endif
+
     #if SIMPLY_WINDOWS
         inline ms_type Thread::max_sleep() noexcept {
             return std::numeric_limits<DWORD>::max() - 1;
@@ -429,6 +735,25 @@ namespace simply {
             return std::numeric_limits<uint32_t>::max();
         }
     #endif
+
+    inline ms_type Thread::max_timeout() noexcept {
+        return max_sleep();
+    }
+
+    void Thread::_ensure_joinable(const std::string& called_from) const {
+        if ( !joinable() )
+            throw std::system_error(
+                std::make_error_code(std::errc::invalid_argument),
+                "Thread::" + called_from + ": Thread is not joinable!"
+            );
+    }
+
+    void Thread::_reset() {
+        handle_ = SIMPLY_NULL_THREAD;
+        #if SIMPLY_std20plus
+            stop_source_ = std::stop_source();
+        #endif
+    }
 
     // +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
     // ++ this_thread
@@ -496,43 +821,21 @@ namespace simply {
 
     #if SIMPLY_WINDOWS
         std::string this_thread::get_name() {
-            std::wstring wname = this_thread::get_wide_name();
-            return from_wide(this_thread::get_wide_name());
+            return _get_name(GetCurrentThread());
         }
 
         void this_thread::set_name(const std::string& name) {
-            this_thread::set_wide_name(this_thread::to_wide(name));
+            _set_name(GetCurrentThread(), name);
         }
 
         std::wstring this_thread::get_wide_name() {
-            PWSTR description = nullptr;
-            GetThreadDescription(GetCurrentThread(), &description); // Check error...
-            std::wstring wname(description);
-            LocalFree(description); // Check error...
-            return wname;
+            return _get_wide_name(GetCurrentThread());
         }
 
         void this_thread::set_wide_name(const std::wstring& wname) {
-            SetThreadDescription(GetCurrentThread(), wname.c_str());
+            _set_wide_name(GetCurrentThread(), wname);
         }
 
-        inline std::string this_thread::from_wide(const std::wstring& wname) noexcept {
-            size_t len = std::wcstombs(nullptr, wname.c_str(), 0) + 1;
-            char* buffer = new char[len];
-            std::wcstombs(buffer, wname.c_str(), len);
-            std::string name(buffer);
-            delete[] buffer;
-            return name;
-        }
-
-        inline std::wstring this_thread::to_wide(const std::string& name) noexcept {
-            size_t len = std::mbstowcs(nullptr, name.c_str(), 0) + 1;
-            wchar_t* buffer = new wchar_t[len];
-            std::mbstowcs(buffer, name.c_str(), len);
-            std::wstring wname(buffer);
-            delete[] buffer;
-            return wname;
-        }
     #elif SIMPLY_LINUX
         inline std::string this_thread::get_name() {
             char name[16];
