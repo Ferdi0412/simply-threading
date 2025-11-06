@@ -33,3 +33,14 @@ option(SIMPLY_BUILD_EXAMPLES "Build examples" ${PROJECT_IS_TOP_LEVEL})
 if ( SIMPLY_BUILD_EXAMPLES )
     add_subdirectory(examples)
 endif()
+
+
+##   Build tests
+## If building from the simply-threading root,
+## will build unless explicitly turned off:
+## `-SIMPLY_BUILD_TESTS=OFF`
+option(SIMPLY_BUILD_TESTS "Build examples" ${PROJECT_IS_TOP_LEVEL})
+
+if ( SIMPLY_BUILD_TESTS )
+    add_subdirectory(tests)
+endif()
