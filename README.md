@@ -1,5 +1,5 @@
 # Simply Threading
-[![Platform](https://img.shields.io/badge/platform-Windows-blue)](https://docs.microsoft.com/en-us/windows/)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-blue)](https://docs.microsoft.com/en-us/windows/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Simply Threading** provides a drop-in replacement for `std::jthread`, 
