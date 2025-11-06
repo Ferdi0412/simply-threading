@@ -155,10 +155,14 @@ For Linux, there are 2 "types" of priority... **[ADD EXPLANATION...]**
     - [ ] Implement `Priority` for Linux
 - [x] Thread class
     - [x] Fix Windows implementation - Appears to run as expected
-    - [ ] Implement for Linux
+    - [x] Implement for Linux
+    - [ ] Stack-size for Linux
+    - [ ] Add `Priority`
+    - [ ] More comprehensive tests
 - [x] tests & examples
     - [ ] Ensure completeness of `simply::Thread` tests
     - [ ] Add some logging/debugging, perhaps also some benchmarking
+- [ ] GitHub workflows for testing
 - RELEASE 0.0.1
 - [ ] FutureThread
 
