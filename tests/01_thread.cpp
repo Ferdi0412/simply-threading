@@ -161,29 +161,29 @@ int simple_arg(int val) { return val; }
 
 TEST(Thread, Callables) {
     auto no_return_lambda = [](){};
-    EXPECT_NO_THROW(Thread(no_return_lambda));
+    EXPECT_NO_THROW(Thread t(no_return_lambda));
 
     auto return_lambda = [](){ return 5; };
-    EXPECT_NO_THROW(Thread(return_lambda));
+    EXPECT_NO_THROW(Thread t(return_lambda));
 
     auto no_return_param_lambda = []( double v ){};
-    EXPECT_NO_THROW(Thread(no_return_param_lambda, 5));
+    EXPECT_NO_THROW(Thread t(no_return_param_lambda, 5));
 
     auto return_param_lambda = []( double v ) { return v; };
-    EXPECT_NO_THROW(Thread(return_param_lambda, 5));
+    EXPECT_NO_THROW(Thread t(return_param_lambda, 5));
 
     bool flag = false;
     auto local_lambda = [&flag](){ return (flag=true); };
-    EXPECT_NO_THROW(Thread(local_lambda));
+    EXPECT_NO_THROW(Thread t(local_lambda));
     EXPECT_TRUE(flag);
 
-    EXPECT_NO_THROW(Thread(no_return));
+    EXPECT_NO_THROW(Thread t(no_return));
 
-    EXPECT_NO_THROW(Thread(simple_return));
+    EXPECT_NO_THROW(Thread t(simple_return));
 
     global_flag = false;
-    EXPECT_NO_THROW(Thread(global_flag));
+    EXPECT_NO_THROW(Thread t(global_return));
     EXPECT_TRUE(global_flag);
 
-    EXPECT_NO_THROW(Thread(simple_arg, 1));
+    EXPECT_NO_THROW(Thread t(simple_arg, 1));
 }
