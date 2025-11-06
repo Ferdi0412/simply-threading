@@ -91,12 +91,6 @@ namespace simply {
         #endif
 
     public:
-        /* === Observers === */
-        ///   max_sleep
-        /// @brief Maximum milliseconds one sleep call supports
-        static ms_type max_sleep() noexcept;
-
-
         /* === Classes Implementations === ========================== */
         ///   id
         /// @brief Used to uniquely identify a thread instance
@@ -147,6 +141,151 @@ namespace simply {
         private:
             native_id_type id_;
         };
+
+        /* === Constructors/Destructor === ========================== */
+    public:
+        ///   NULL Thread Constructor
+        Thread() noexcept;
+
+        ///   Constructor
+        /// @brief Create and immediately execute on new thread
+        template <class F, class... Args>
+        Thread(F&& f, Args&&... args);
+
+        ///   Constructor
+        /// @brief Create and immediately execute on new thread
+        template <class F, class... Args>
+        Thread(size_t stack_size, F&& f, Args&&... args);
+
+        ///   Destructor {blocking}
+        /// @brief Will join if joinable
+        ~Thread();
+
+        ///   Single-Ownership
+        Thread(const Thread&) = delete;
+        Thread& operator=(const Thread&) = delete;
+
+        ///   Move Constructor
+        Thread(Thread&& other) = default;
+
+        ///   Move Assignment {blocking}
+        /// @brief If this is joinable, will join
+        Thread& operator=(Thread&& other);
+
+        ///   swap
+        /// @brief Swap instances
+        void swap(Thread& other) noexcept;
+
+        /* === Observers === ======================================== */
+        ///   joinable
+        /// @brief Check if thread can join or detach
+        bool joinable() const noexcept;
+
+        ///   get_id
+        /// @brief Get a unique identifier for this thread
+        id get_id() const noexcept;
+
+        ///   get_name
+        /// @brief Get name for this thread
+        std::string get_name() const;
+
+        #if SIMPLY_WINDOWS
+            ///   get_wide_name {Windows}
+            /// @brief Get the wide string name for this thread
+            std::wstring get_wide_name() const;
+
+        #endif
+
+        ///   native_handle
+        /// @brief Get the native handle for custom control
+        native_handle_type native_handle();
+        
+        /* === Control/Operations === =============================== */
+        ///   join {blocking}
+        /// @brief Block until thread joins
+        void join();
+
+        ///   join {timed}
+        /// @brief Timed join
+        /// 
+        /// If the thread doesn't join in specified timeout, it will
+        /// still be joinable
+        void join(ms_type ms_timeout);
+
+        ///   join_for {timed}
+        /// @brief Timed join using standard chrono library
+        template <class Rep, class Period>
+        void join_for(const std::chrono::duration<Rep, Period>& timeout_duration) const;
+
+        ///   join_until {timed}
+        /// @brief Timed join, returning if thread hasn't joined by timepoint
+        template <class Clock, class Duration>
+        void join_until(const std::chrono::time_point<Clock, Duration>& timeout_time) const;
+
+        ///   detach
+        /// @brief Let thread execute independently of this object
+        void detach();
+
+        /* === More Options === ======================================*/
+        ///   set_name
+        /// @brief Set a human-readable name for this thread
+        ///
+        /// For Linux, this cannot be more than 15 characters
+        void set_name(const std::string& name);
+
+        #if SIMPLY_WINDOWS
+            ///   set_wide_name {Windows}
+            /// @brief Set a human-readable name using wide string
+            void set_wide_name(const std::wstring& name);
+        #endif
+
+        /* === Stop Token Support === =============================== */
+        #if SIMPLY_std20plus
+            ///   get_stop_source {C++ std >= 20}
+            /// @brief Get a copy of the stop source controlling the thread
+            ///
+            /// Even if no stop token was provided by the class to the thread,
+            /// this stop source will be valid, just not very usefull
+            std::stop_source get_stop_source() noexcept;
+
+            ///   get_stop_token {C++ std >= 20}
+            /// @brief Get a copy of the stop token passed to the thread
+            ///
+            /// Even if no stop token was provided by the class to the thread,
+            /// this stop token will be valid, and get a stop requested
+            /// on the first of the following:
+            ///  - Any of the Thread join methods are called
+            ///  - The Thread request_stop method is called
+            ///  - The Thread get_stop_source method produced a source which requested the stop
+            std::stop_token get_stop_token() const noexcept;
+
+            ///   request_stop
+            /// @brief Requests a stop
+            ///
+            /// If no stop token was provided by the class to the thread,
+            /// this is still valid, and will propogate the stop request
+            /// to any stop tokens returned by the `get_stop_token` method
+            bool request_stop() noexcept;
+
+        #endif
+
+        /* === Static Methods === =================================== */
+        ///   hardware_concurrency
+        /// @brief Maximum number of hardware-supported threads
+        /// 
+        /// This will "fail silently" according to standard's requirements,
+        /// so a value of `0` is returned if this cannot be retrieved.
+        ///
+        /// For Windows, the max value returned here will be 64, even
+        /// if more than 64 threads are supported.
+        static unsigned int hardware_concurrency() noexcept;
+
+        ///   max_sleep
+        /// @brief Maximum milliseconds one sleep call supports
+        static ms_type max_sleep() noexcept;
+    
+    private:
+        native_handle_type handle_;    
     };
 
     // =================================================================
